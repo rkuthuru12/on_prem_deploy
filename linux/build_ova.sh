@@ -28,8 +28,15 @@ cp "$tmpdir"/"$VMDK_PATH" "$tmpdir"/"$HOSTNAME"/
 
 b64_user_data=$(bash build_vm_user_data.sh "$HOSTNAME" | base64)
 b64_network_config=$(bash build_network_config.sh "$IP_ADDRESS" | base64)
-vmdk_size=$(stat -f "%z" "$tmpdir"/"$VMDK_PATH")
 
+file_path="$tmpdir/$VMDK_PATH"
+if stat --version >/dev/null 2>&1; then
+    # GNU stat (Linux, Git Bash)
+    vmdk_size=$(stat -c "%s" "$file_path")
+else
+    # BSD/macOS stat
+    vmdk_size=$(stat -f "%z" "$file_path")
+fi
 cat > "$tmpdir"/"$HOSTNAME"/"$HOSTNAME".ovf <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:cim="http://schemas.dmtf.org/wbem/wscim/1/common" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1" xmlns:rasd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_ResourceAllocationSettingData" xmlns:vmw="http://www.vmware.com/schema/ovf" xmlns:vssd="http://schemas.dmtf.org/wbem/wscim/1/cim-schema/2/CIM_VirtualSystemSettingData" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
@@ -205,10 +212,19 @@ pushd "$tmpdir"/"$HOSTNAME" > /dev/null
 # shellcheck disable=SC2035
 openssl sha1 *.vmdk *.ovf > "$HOSTNAME".mf
 
-tar -cf ../"$HOSTNAME".ova \
-    --format=ustar --no-acls --no-fflags --no-xattrs \
-    --uid 0 --gid 0 \
-    "$HOSTNAME".* "$VMDK_PATH"
+if tar --version 2>/dev/null | grep -q 'bsdtar'; then
+    # BSD tar supports --uid and --gid
+    tar -cf "../${HOSTNAME}.ova" \
+        --format=ustar --no-acls --no-fflags --no-xattrs \
+        --uid 0 --gid 0 \
+        "${HOSTNAME}".* "$VMDK_PATH"
+else
+    # GNU tar does NOT support --uid/--gid
+    tar -cf "../${HOSTNAME}.ova" \
+        --format=ustar \
+        "${HOSTNAME}".* "$VMDK_PATH"
+fi
+
 cp "$HOSTNAME".ovf "$tmpdir"
 popd > /dev/null
 rm -r "${tmpdir:?}"/"$HOSTNAME"
